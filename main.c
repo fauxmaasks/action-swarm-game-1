@@ -14,14 +14,14 @@
 #define SCREEN_H        720
 #define PLAYER_SIZE     28
 #define ENEMY_SIZE      28
-#define BULLET_SIZE     8
+#define BULLET_SIZE     18
 #define BULLET_SPEED    600.0f
 #define PLAYER_SPEED    220.0f
 #define RAT_SPEED       90.0f
 #define DASH_SPEED      900.0f
 #define DASH_DURATION   0.18f
 #define DASH_COOLDOWN   1.2f
-#define CROSS_COOLDOWN  3.0f
+#define CROSS_COOLDOWN  0.0f
 #define CROSS_BULLETS   8
 #define MAX_BULLETS     128
 #define MAX_ENEMIES     16
@@ -139,7 +139,7 @@ static void FireBullet(Vector2 from, Vector2 dir, Color col) {
             b->pos      = from;
             b->vel      = (Vector2){ dir.x*BULLET_SPEED, dir.y*BULLET_SPEED };
             b->active   = true;
-            b->lifetime = 2.5f;
+            b->lifetime = 4.5f;
             b->color    = col;
             b->size     = BULLET_SIZE;
             return;
@@ -190,6 +190,41 @@ static void Init(void) {
     memset(particles, 0, sizeof particles);
     score       = 0;
     screenShake = 0;
+}
+// old burst spell (cool idea, make more of these)
+// for (int i = 0; i < CROSS_BULLETS; i++) {
+//     float angle = (360.0f / CROSS_BULLETS) * i * DEG2RAD;
+//     Vector2 dir = { cosf(angle), sinf(angle) };
+//     if(i<=2) {
+//         printf("cross = dir.x = %f, dir.y = %f\n", dir.x, dir.y);
+//     }
+//     for (int j = 0; j < MAX_BULLETS; j++) {
+//         if (!bullets[j].active) {
+//             bullets[j].pos      = mp;
+//             bullets[j].vel      = (Vector2){ dir.x * BULLET_SPEED * 0.85f,
+//                                              dir.y * BULLET_SPEED * 0.85f };
+//             bullets[j].active   = true;
+//             bullets[j].lifetime = 1.8f;
+//             bullets[j].color    = (Color){255, 80, 200, 255};
+//             bullets[j].size     = 10;
+//             break;
+//         }
+//     }
+// }
+// SpawnBurst(mp, (Color){255,80,200,255}, 20);
+
+void handle_spells(Player* p, float dt) {
+    if (p->crossCooldown > 0) p->crossCooldown -= dt;
+    if (IsMouseButtonPressed(MOUSE_BUTTON_RIGHT) && p->crossCooldown <= 0) {
+        Vector2 mp = GetMousePosition();
+        printf("bullet = dir.x = %f, dir.y = %f\n", mp.x, mp.y);
+        Vector2 mp_to_p = {mp.x - p->pos.x , mp.y - p->pos.y};
+        float mag = sqrtf(mp_to_p.x*mp_to_p.x + mp_to_p.y*mp_to_p.y);
+        Vector2 bdir = { mp_to_p.x / mag, mp_to_p.y / mag };
+        FireBullet(p->pos, bdir,(Color){255,80,200,255});
+        p->crossCooldown = CROSS_COOLDOWN;
+        screenShake = 0.3f;
+    }
 }
 
 // ─── Update ───────────────────────────────────────────────────────────────────
@@ -377,29 +412,7 @@ static void Update(float dt) {
     if (player.iFrames > 0) player.iFrames -= dt;
 
     // ── Cross ability (RMB) ──────────────────────────────────────────────────
-    if (player.crossCooldown > 0) player.crossCooldown -= dt;
-    if (IsMouseButtonPressed(MOUSE_BUTTON_RIGHT) && player.crossCooldown <= 0) {
-        Vector2 mp = GetMousePosition();
-        for (int i = 0; i < CROSS_BULLETS; i++) {
-            float angle = (360.0f / CROSS_BULLETS) * i * DEG2RAD;
-            Vector2 dir = { cosf(angle), sinf(angle) };
-            for (int j = 0; j < MAX_BULLETS; j++) {
-                if (!bullets[j].active) {
-                    bullets[j].pos      = mp;
-                    bullets[j].vel      = (Vector2){ dir.x * BULLET_SPEED * 0.85f,
-                                                     dir.y * BULLET_SPEED * 0.85f };
-                    bullets[j].active   = true;
-                    bullets[j].lifetime = 1.8f;
-                    bullets[j].color    = (Color){255, 80, 200, 255};
-                    bullets[j].size     = 10;
-                    break;
-                }
-            }
-        }
-        player.crossCooldown = CROSS_COOLDOWN;
-        SpawnBurst(mp, (Color){255,80,200,255}, 20);
-        screenShake = 0.3f;
-    }
+    handle_spells(&player, dt);
 
     // ── Update bullets ────────────────────────────────────────────────────────
     for (int i = 0; i < MAX_BULLETS; i++) {
