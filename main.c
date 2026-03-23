@@ -26,8 +26,26 @@
 #define MAX_BULLETS     128
 #define MAX_ENEMIES     16
 #define MAX_PARTICLES   256
+#define PERCENT_WINDUP 0.10f
+#define PERCENT_LOCK 0.90f
+#define SQUARE_SIZE 48
+#define SQUARE_SIZEf 48.0f
 
 // ─── Types ────────────────────────────────────────────────────────────────────
+typedef enum {
+    SHAPE_NONE,
+    SHAPE_RECT,
+    SHAPE_CIRCLE,
+    SHAPE_CROSS,
+} ShapeKind;
+
+typedef struct {
+    ShapeKind kind;
+    int width;
+    int height;
+    int size;
+} Shape2D;
+
 typedef struct {
     Vector2 pos;
     Vector2 vel;
@@ -63,6 +81,16 @@ typedef struct {
 //                any movement input is stored in moveBuffer and applied on exit
 typedef enum { ATK_IDLE, ATK_WINDUP, ATK_LOCKED } AtkState;
 
+typedef enum {
+    SPELL_NONE,
+    SPELL_LIGHTNING_BOLT,
+    SPELL_CONJURE_FIRE,
+    SPELL_BERSERK,
+    SPELL_WATER_PILLAR,
+    SPELL_WATER_WAVE,
+    SPELL_ENERGY_HULL,
+} SpellKind;
+
 typedef struct {
     Vector2  pos;
     float    hp;
@@ -83,6 +111,7 @@ typedef struct {
     float    atkLockTimer;   // counts DOWN during locked phase
     int      atkTargetIdx;   // index into enemies[], -1 = no target
     Vector2  moveBuffer;     // last held direction, flushed when lock ends
+    SpellKind spellSelected;
 } Player;
 
 // ─── Globals ──────────────────────────────────────────────────────────────────
@@ -96,10 +125,12 @@ static float    screenShake  = 0.0f;
 static Vector2  atkLineFrom  = {0,0};
 static Vector2  atkLineTo    = {0,0};
 static float    atkLineTimer = 0.0f;
-#define ATK_LINE_DURATION 0.08f
+#define ATK_LINE_DURATION 0.1f
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
-static float V2Len(Vector2 v) { return sqrtf(v.x*v.x + v.y*v.y); }
+static float V2Len(Vector2 v) { 
+    return sqrtf(v.x*v.x + v.y*v.y); 
+}
 
 static Vector2 V2Norm(Vector2 v) {
     float l = V2Len(v);
@@ -147,27 +178,32 @@ static void FireBullet(Vector2 from, Vector2 dir, Color col) {
     }
 }
 
+void SpawnAtkArea(Shape2D shape, Vector2 pos){
+    
+}
+
 // ─── Init ─────────────────────────────────────────────────────────────────────
 static void Init(void) {
-    player.pos           = (Vector2){SCREEN_W/2.0f, SCREEN_H/2.0f};
-    player.hp            = 100;
-    player.maxHp         = 100;
-    player.dashing       = false;
-    player.dashTimer     = 0;
-    player.dashCooldown  = 0;
-    player.crossCooldown = 0;
-    player.iFrames       = 0;
-    player.atkSpeed      = 1.5f;   // fullAtkDuration = 2 / 1.5 ≈ 1.33s
-    player.atkState      = ATK_IDLE;
-    player.atkWindupTimer= 0;
-    player.atkLockTimer  = 0;
-    player.atkTargetIdx  = -1;
-    player.moveBuffer    = (Vector2){0,0};
+    player.pos            = (Vector2){SCREEN_W/2.0f, SCREEN_H/2.0f};
+    player.hp             = 100;
+    player.maxHp          = 100;
+    player.dashing        = false;
+    player.dashTimer      = 0;
+    player.dashCooldown   = 0;
+    player.crossCooldown  = 0;
+    player.iFrames        = 0;
+    player.atkSpeed       = 1.5f;   // fullAtkDuration = 2 / 1.5 ≈ 1.33s
+    player.atkState       = ATK_IDLE;
+    player.atkWindupTimer = 0;
+    player.atkLockTimer   = 0;
+    player.atkTargetIdx   = -1;
+    player.moveBuffer     = (Vector2){0,0};
+    player.spellSelected  = SPELL_CONJURE_FIRE;
 
     // Spawn dummy enemies in a rough ring
-    int dummies = 6;
+    int dummies_count = 6;
     float angles[] = {30,90,150,210,270,330};
-    for (int i = 0; i < dummies; i++) {
+    for (int i = 0; i < dummies_count; i++) {
         float a = angles[i] * DEG2RAD;
         enemies[i].pos      = (Vector2){ SCREEN_W/2 + cosf(a)*320, SCREEN_H/2 + sinf(a)*260 };
         enemies[i].hp       = 50;
@@ -176,15 +212,16 @@ static void Init(void) {
         enemies[i].type     = ENEMY_DUMMY;
         enemies[i].flashTimer = 0;
     }
+
     // Spawn one rat
-    enemies[dummies].pos       = (Vector2){ 100, 100 };
-    enemies[dummies].hp        = 30;
-    enemies[dummies].maxHp     = 30;
-    enemies[dummies].active    = true;
-    enemies[dummies].type      = ENEMY_RAT;
-    enemies[dummies].flashTimer= 0;
+    enemies[dummies_count].pos       = (Vector2){ 100, 100 };
+    enemies[dummies_count].hp        = 30;
+    enemies[dummies_count].maxHp     = 30;
+    enemies[dummies_count].active    = true;
+    enemies[dummies_count].type      = ENEMY_RAT;
+    enemies[dummies_count].flashTimer= 0;
     // Clear the rest
-    for (int i = dummies+1; i < MAX_ENEMIES; i++) enemies[i].active = false;
+    for (int i = dummies_count+1; i < MAX_ENEMIES; i++) enemies[i].active = false;
 
     memset(bullets,   0, sizeof bullets);
     memset(particles, 0, sizeof particles);
@@ -216,31 +253,56 @@ static void Init(void) {
 void handle_spells(Player* p, float dt) {
     if (p->crossCooldown > 0) p->crossCooldown -= dt;
     if (IsMouseButtonPressed(MOUSE_BUTTON_RIGHT) && p->crossCooldown <= 0) {
-        Vector2 mp = GetMousePosition();
-        printf("bullet = dir.x = %f, dir.y = %f\n", mp.x, mp.y);
-        Vector2 mp_to_p = {mp.x - p->pos.x , mp.y - p->pos.y};
-        float mag = sqrtf(mp_to_p.x*mp_to_p.x + mp_to_p.y*mp_to_p.y);
-        Vector2 bdir = { mp_to_p.x / mag, mp_to_p.y / mag };
-        FireBullet(p->pos, bdir,(Color){255,80,200,255});
-        p->crossCooldown = CROSS_COOLDOWN;
-        screenShake = 0.3f;
+        switch(p->spellSelected) {
+            case SPELL_LIGHTNING_BOLT:
+                {
+                Vector2 mp = GetMousePosition();
+                Vector2 p_to_mp = {mp.x - p->pos.x , mp.y - p->pos.y};
+                Vector2 p_to_mp_norm = V2Norm(p_to_mp);
+                FireBullet(p->pos, p_to_mp_norm,(Color){255,80,200,255});
+                p->crossCooldown = CROSS_COOLDOWN;
+                screenShake = 0.3f;
+                }
+                break;
+            
+            case SPELL_CONJURE_FIRE:
+                {
+                Vector2 mp = GetMousePosition();
+                float fmod_x = fmod(mp.x, SQUARE_SIZEf);
+                float fmod_y = fmod(mp.y, SQUARE_SIZEf);
+                Vector2 point = { mp.x - fmod_x, mp.y - fmod_y};
+                Rectangle r = {point.x, point.y, SQUARE_SIZE, SQUARE_SIZE};
+                for (int i = 0; i < MAX_ENEMIES; i++) {
+                    Enemy* e = &enemies[i]; 
+                    if(!e->active){
+                        continue;
+                    } 
+                    if(CheckCollisionRecs(r, EntityRect(e->pos, ENEMY_SIZE + 6))){
+                        printf("e collided! type = %d", e->type );
+                        e->hp -= 10; 
+                    }
+                }
+                p->crossCooldown = CROSS_COOLDOWN;
+                screenShake = 0.3f;
+                }
+                break;
+
+            default:
+                break;
+        }
     }
 }
 
-// ─── Update ───────────────────────────────────────────────────────────────────
-static void Update(float dt) {
+void handle_player_stuff(float dt){
     // Screen shake decay
     if (screenShake > 0) screenShake -= dt * 8.0f;
     if (screenShake < 0) screenShake = 0;
     if (atkLineTimer > 0) atkLineTimer -= dt;
-
     // ── Derived attack timing ─────────────────────────────────────────────────
     // fullAtkDuration = 2 / atkSpeed
-    // windupDuration  = 10% of full
-    // lockDuration    = 90% of full
     float fullAtkDuration  = 2.0f / player.atkSpeed;
-    float windupDuration   = fullAtkDuration * 0.10f;
-    float lockDuration     = fullAtkDuration * 0.90f;
+    float windupDuration   = fullAtkDuration * PERCENT_WINDUP;
+    float lockDuration     = fullAtkDuration * PERCENT_LOCK;
 
     // ── Read movement input (always, used for buffer too) ─────────────────────
     Vector2 move = {0,0};
@@ -333,13 +395,6 @@ static void Update(float dt) {
                     atkLineTo    = t->pos;
                     atkLineTimer = ATK_LINE_DURATION;
                     screenShake = 0.12f;
-                    if (t->hp <= 0) {
-                        t->active = false;
-                        SpawnBurst(t->pos, t->type == ENEMY_RAT ?
-                                   (Color){80,120,255,255} : (Color){200,200,200,255}, 20);
-                        score += (t->type == ENEMY_RAT) ? 50 : 20;
-                        screenShake = 0.4f;
-                    }
                     // Muzzle particles
                     for (int i = 0; i < 5; i++)
                         SpawnParticle(player.pos, (Color){255,220,60,200}, 120, 0.18f, 4.0f);
@@ -414,6 +469,64 @@ static void Update(float dt) {
     // ── Cross ability (RMB) ──────────────────────────────────────────────────
     handle_spells(&player, dt);
 
+}
+
+void handle_particles(float dt) {
+    // ── Update particles ──────────────────────────────────────────────────────
+    for (int i = 0; i < MAX_PARTICLES; i++) {
+        Particle *p = &particles[i];
+        if (p->life <= 0) continue;
+        p->pos.x += p->vel.x * dt;
+        p->pos.y += p->vel.y * dt;
+        p->vel.x *= 0.92f;
+        p->vel.y *= 0.92f;
+        p->life  -= dt;
+        p->size  *= 0.97f;
+    }
+}
+
+
+void handle_enemies(float dt) {
+    // ── Update enemies ────────────────────────────────────────────────────────
+    Vector2 mp = GetMousePosition();
+    float fmod_x = fmod(mp.x, SQUARE_SIZEf);
+    float fmod_y = fmod(mp.y, SQUARE_SIZEf);
+    Vector2 point = { mp.x - fmod_x, mp.y - fmod_y};
+    Rectangle r = {point.x, point.y, SQUARE_SIZE, SQUARE_SIZE};
+    for (int i = 0; i < MAX_ENEMIES; i++) {
+        Enemy *e = &enemies[i];
+
+        // if(CheckCollisionRecs(r, EntityRect(e->pos, ENEMY_SIZE + 6))){
+        //     printf("COLIDING!!");
+        // }
+        if (!e->active) continue;
+        if(e->hp <= 0){
+            e->active = false;
+            SpawnBurst(e->pos, e->type == ENEMY_RAT ?
+                       (Color){80,120,255,255} : (Color){200,200,200,255}, 20);
+        } 
+        if (e->flashTimer > 0) e->flashTimer -= dt;
+
+        if (e->type == ENEMY_RAT) {
+            Vector2 dir = V2Norm((Vector2){player.pos.x - e->pos.x,
+                                           player.pos.y - e->pos.y});
+            e->pos.x += dir.x * RAT_SPEED * dt;
+            e->pos.y += dir.y * RAT_SPEED * dt;
+
+            if (player.iFrames <= 0 &&
+                CheckCollisionRecs(EntityRect(player.pos, PLAYER_SIZE),
+                                   EntityRect(e->pos, ENEMY_SIZE))) {
+                player.hp      -= 15;
+                player.iFrames  = 0.5f;
+                screenShake     = 0.5f;
+                SpawnBurst(player.pos, RED, 12);
+            }
+        }
+    }
+
+}
+
+void handle_bullets(float dt){
     // ── Update bullets ────────────────────────────────────────────────────────
     for (int i = 0; i < MAX_BULLETS; i++) {
         Bullet *b = &bullets[i];
@@ -451,39 +564,42 @@ static void Update(float dt) {
         }
     }
 
-    // ── Update enemies ────────────────────────────────────────────────────────
-    for (int i = 0; i < MAX_ENEMIES; i++) {
-        Enemy *e = &enemies[i];
-        if (!e->active) continue;
-        if (e->flashTimer > 0) e->flashTimer -= dt;
+}
 
-        if (e->type == ENEMY_RAT) {
-            Vector2 dir = V2Norm((Vector2){player.pos.x - e->pos.x,
-                                           player.pos.y - e->pos.y});
-            e->pos.x += dir.x * RAT_SPEED * dt;
-            e->pos.y += dir.y * RAT_SPEED * dt;
+// ─── Update ───────────────────────────────────────────────────────────────────
+static void Update(float dt) {
 
-            if (player.iFrames <= 0 &&
-                CheckCollisionRecs(EntityRect(player.pos, PLAYER_SIZE),
-                                   EntityRect(e->pos, ENEMY_SIZE))) {
-                player.hp      -= 15;
-                player.iFrames  = 0.5f;
-                screenShake     = 0.5f;
-                SpawnBurst(player.pos, RED, 12);
-            }
-        }
-    }
+    handle_player_stuff(dt);
+    handle_enemies(dt);
+    handle_bullets(dt);
+    handle_particles(dt);
+}
 
-    // ── Update particles ──────────────────────────────────────────────────────
-    for (int i = 0; i < MAX_PARTICLES; i++) {
-        Particle *p = &particles[i];
-        if (p->life <= 0) continue;
-        p->pos.x += p->vel.x * dt;
-        p->pos.y += p->vel.y * dt;
-        p->vel.x *= 0.92f;
-        p->vel.y *= 0.92f;
-        p->life  -= dt;
-        p->size  *= 0.97f;
+void handle_draw_spell_preview(){
+
+    Vector2 mp = GetMousePosition();
+    switch(player.spellSelected){
+        case SPELL_LIGHTNING_BOLT:
+            // float alpha = atkLineTimer / ATK_LINE_DURATION;
+            Color lc = Fade(WHITE, 0.85f);
+            Vector2 from = player.pos;
+            Vector2 to = mp;
+            DrawLineEx(
+                (Vector2){},
+                (Vector2){  },
+                1.5f, lc
+            );
+            break;
+        case SPELL_CONJURE_FIRE:
+            float fmod_x = fmod(mp.x, SQUARE_SIZEf);
+            float fmod_y = fmod(mp.y, SQUARE_SIZEf);
+            Vector2 p = { mp.x - fmod_x, mp.y - fmod_y};
+            Rectangle r = {p.x, p.y, SQUARE_SIZE, SQUARE_SIZE};
+            DrawRectangleRec(r, RED);
+            break;
+
+        default:
+            break;
     }
 }
 
@@ -503,9 +619,9 @@ static void Draw(void) {
     ClearBackground((Color){18, 18, 28, 255});
 
     // Subtle grid
-    for (int x = 0; x < SCREEN_W; x += 48)
+    for (int x = 0; x < SCREEN_W; x += SQUARE_SIZE)
         DrawLine(x + (int)shake.x, 0, x + (int)shake.x, SCREEN_H, (Color){30,30,50,255});
-    for (int y = 0; y < SCREEN_H; y += 48)
+    for (int y = 0; y < SCREEN_H; y += SQUARE_SIZE)
         DrawLine(0, y + (int)shake.y, SCREEN_W, y + (int)shake.y, (Color){30,30,50,255});
 
     // ── Draw line to selected target ─────────────────────────────────────────
@@ -553,6 +669,9 @@ static void Draw(void) {
                       (int)(p->pos.y - p->size/2 + shake.y),
                       (int)p->size, (int)p->size, c);
     }
+
+    // ── Spell Shape Show ──────────────────────────────────────────────────────
+    handle_draw_spell_preview();
 
     // ── Enemies ───────────────────────────────────────────────────────────────
     for (int i = 0; i < MAX_ENEMIES; i++) {

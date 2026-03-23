@@ -16,7 +16,14 @@ FeatureDetails
 - um inimigo dropou umas pernas que te ajudam a dashar mais longe, menos custo de mana com abilidades de movimento
 - inimigo snake (começa peqeno, vai comendo e ficando grande, previnir dele feixar o level), tem qe bater na cabeça dele
 
-
-## Mecanicas
-
-- 
+## Spells
+- Try out interesting Apogea Spells
+    - Aoe Around u (various sizes and shapes)
+    - line atk (normal, piercing, triple shot, shot goes wide then hones in)
+        - when hit -> teleports, burst, dot, freeze?, does aoe around it
+    - single tile, cross, 3x3
+    - water wave, fire thingy
+    
+- different ones
+    - arc atk
+    - atk is in a line but dmg is dealt in pieces (kinda like demon from thyranya lightning atk)
