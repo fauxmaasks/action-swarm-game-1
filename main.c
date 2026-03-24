@@ -29,6 +29,7 @@
 #define PERCENT_WINDUP 0.10f
 #define PERCENT_LOCK 0.90f
 #define SQUARE_SIZE 48
+#define SQUARE_PAD 4
 #define SQUARE_SIZEf 48.0f
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -46,6 +47,11 @@ typedef struct {
     int size;
 } Shape2D;
 
+typedef enum {
+    BULLET_NORMAL,
+    BULLET_PIERCING,
+} BulletKind;
+
 typedef struct {
     Vector2 pos;
     Vector2 vel;
@@ -53,6 +59,7 @@ typedef struct {
     float   lifetime;
     Color   color;
     float   size;
+    BulletKind kind;
 } Bullet;
 
 typedef enum { ENEMY_DUMMY, ENEMY_RAT } EnemyType;
@@ -138,6 +145,14 @@ static Vector2 V2Norm(Vector2 v) {
     return (Vector2){v.x/l, v.y/l};
 }
 
+static Vector2 V2Scale(Vector2 v, float scale) {
+    return (Vector2){v.x*scale, v.y*scale};
+}
+
+static Vector2 V2Sum(Vector2 v1, Vector2 v2) {
+    return (Vector2){v1.x + v2.x, v1.y + v2.y};
+}
+
 static Rectangle EntityRect(Vector2 pos, float size) {
     return (Rectangle){ pos.x - size/2, pos.y - size/2, size, size };
 }
@@ -198,7 +213,7 @@ static void Init(void) {
     player.atkLockTimer   = 0;
     player.atkTargetIdx   = -1;
     player.moveBuffer     = (Vector2){0,0};
-    player.spellSelected  = SPELL_CONJURE_FIRE;
+    player.spellSelected  = SPELL_LIGHTNING_BOLT;
 
     // Spawn dummy enemies in a rough ring
     int dummies_count = 6;
@@ -278,6 +293,29 @@ void handle_spells(Player* p, float dt) {
                         continue;
                     } 
                     if(CheckCollisionRecs(r, EntityRect(e->pos, ENEMY_SIZE + 6))){
+                        printf("e collided! type = %d", e->type );
+                        e->hp -= 10; 
+                    }
+                }
+                p->crossCooldown = CROSS_COOLDOWN;
+                screenShake = 0.3f;
+                }
+                break;
+
+            case SPELL_BERSERK:
+                {
+                Vector2 pos = p->pos;
+                float fmod_x = fmod(pos.x, SQUARE_SIZEf);
+                float fmod_y = fmod(pos.y, SQUARE_SIZEf);
+                Vector2 point = { pos.x - fmod_x, pos.y - fmod_y};
+                Color c = (Color){ 230, 41, 55, 150 };
+                Rectangle r = {point.x - SQUARE_SIZE, point.y - SQUARE_SIZE, 3*SQUARE_SIZE, 3*SQUARE_SIZE};
+                for (int i = 0; i < MAX_ENEMIES; i++) {
+                    Enemy* e = &enemies[i]; 
+                    if(!e->active){
+                        continue;
+                    } 
+                    if(CheckCollisionRecs(r, EntityRect(e->pos, ENEMY_SIZE))){
                         printf("e collided! type = %d", e->type );
                         e->hp -= 10; 
                     }
@@ -580,23 +618,94 @@ void handle_draw_spell_preview(){
     Vector2 mp = GetMousePosition();
     switch(player.spellSelected){
         case SPELL_LIGHTNING_BOLT:
+            {
             // float alpha = atkLineTimer / ATK_LINE_DURATION;
             Color lc = Fade(WHITE, 0.85f);
             Vector2 from = player.pos;
             Vector2 to = mp;
-            DrawLineEx(
-                (Vector2){},
-                (Vector2){  },
-                1.5f, lc
-            );
+            Vector2 full_dir = (Vector2){from.x - to.x, from.y - to.y};
+            if(abs(V2Len(full_dir)) > 300.f) {
+                Vector2 toN = V2Norm(to);
+                to = V2Sum(to, V2Scale(V2Norm(full_dir), V2Len(full_dir) - 300.f));
+            }
+            Vector2 dir = V2Scale(V2Norm(full_dir), 5.f);
+            Vector2 r1 = {dir.y, -dir.x};
+            Vector2 r2 = {-dir.y, dir.x};
+
+            DrawLineEx(V2Sum(from, r1), V2Sum(to, r1), 1.f, lc);
+            DrawLineEx(V2Sum(from, r2), V2Sum(to, r2), 1.f, lc);
+            float spacing = 12.f;
+            float length  = V2Len(full_dir);
+            Vector2 along = V2Norm(full_dir);
+            int steps     = (int)(length / spacing);
+
+            for (int i = 1; i < steps; i++) {
+                float t = i * spacing;
+                Vector2 center = V2Sum(from, V2Scale(along, -t));
+
+                // Always cross from r1 side to r2 side at the NEXT step along
+                Vector2 a = V2Sum(center, r1);
+                Vector2 b = V2Sum(V2Sum(center, V2Scale(along, -spacing)), r2);
+
+                DrawLineEx(a, b, 1.f, lc);
+            }
+
+            }
+
             break;
         case SPELL_CONJURE_FIRE:
+            {
             float fmod_x = fmod(mp.x, SQUARE_SIZEf);
             float fmod_y = fmod(mp.y, SQUARE_SIZEf);
             Vector2 p = { mp.x - fmod_x, mp.y - fmod_y};
-            Rectangle r = {p.x, p.y, SQUARE_SIZE, SQUARE_SIZE};
-            DrawRectangleRec(r, RED);
+            Rectangle r = {p.x + SQUARE_PAD, p.y + SQUARE_PAD, SQUARE_SIZE - SQUARE_PAD, SQUARE_SIZE - SQUARE_PAD};
+            Color c = (Color){ 230, 41, 55, 150 };
+            DrawRectangleRounded(r, .3f, 0, c);
+            }
             break;
+
+        case SPELL_BERSERK:
+            {
+            Vector2 pos = player.pos;
+            float fmod_x = fmod(pos.x, SQUARE_SIZEf);
+            float fmod_y = fmod(pos.y, SQUARE_SIZEf);
+            Vector2 p = { pos.x - fmod_x, pos.y - fmod_y};
+            Color c = (Color){ 230, 41, 55, 150 };
+            Rectangle r = {p.x, p.y, SQUARE_SIZE, SQUARE_SIZE};
+            for (int i = -1; i < 2; i++){
+                for (int j = -1; j < 2; j++){
+                    Rectangle nr = {
+                            p.x + i*SQUARE_SIZE + SQUARE_PAD, 
+                            p.y + j*SQUARE_SIZE + SQUARE_PAD, 
+                            SQUARE_SIZE - SQUARE_PAD, 
+                            SQUARE_SIZE - SQUARE_PAD
+                        };
+                    DrawRectangleRounded(nr, .3f, 0, c);
+                }
+            }
+            }
+            break;
+
+        case SPELL_ENERGY_HULL:
+            {
+            Color lc = Fade(WHITE, 0.85f);
+            Vector2 from = player.pos;
+            Vector2 to = mp;
+            Vector2 full_dir = (Vector2){from.x - to.x, from.y - to.y};
+            if(abs(V2Len(full_dir)) > 200.f) {
+                Vector2 toN = V2Norm(to);
+                to = V2Sum(to, V2Scale(V2Norm(full_dir), V2Len(full_dir) - 200.f));
+            }
+
+            Vector2 dir = V2Scale(V2Norm(full_dir), 30.f);
+            Vector2 r1 = {dir.y, -dir.x};
+            Vector2 r2 = {-dir.y, dir.x};
+
+            DrawLineEx(V2Sum(from, r1), V2Sum(to, r1), 1.f, lc);
+            DrawLineEx(V2Sum(from, r2), V2Sum(to, r2), 1.f, lc);
+            }
+            break;
+
 
         default:
             break;

@@ -11,13 +11,8 @@ FeatureDetails
 - Screen shake - Triggers on hits, deaths, cross blast
 - HUD - HP bar, dash/cross cooldown bars, score, crosshair cursor
 
-## situação maneira
-- vc derrotou um boss goblin mago e ele dropou a cabeça dele e vc pode vestir ela pra ganhar bonus de status e uma magia nova
-- um inimigo dropou umas pernas que te ajudam a dashar mais longe, menos custo de mana com abilidades de movimento
-- inimigo snake (começa peqeno, vai comendo e ficando grande, previnir dele feixar o level), tem qe bater na cabeça dele
-
 ## Spells
-- Try out interesting Apogea Spells
+- Try out interesting Apogea-like Spells
     - Aoe Around u (various sizes and shapes)
     - line atk (normal, piercing, triple shot, shot goes wide then hones in)
         - when hit -> teleports, burst, dot, freeze?, does aoe around it
