@@ -25,6 +25,7 @@
 #define CROSS_BULLETS   8
 #define MAX_BULLETS     128
 #define MAX_ENEMIES     16
+#define MAX_HITS_BULLET 16
 #define MAX_PARTICLES   256
 #define PERCENT_WINDUP 0.10f
 #define PERCENT_LOCK 0.90f
@@ -55,10 +56,13 @@ typedef enum {
 typedef struct {
     Vector2 pos;
     Vector2 vel;
+    float dist_travelled;
     bool    active;
     float   lifetime;
     Color   color;
     float   size;
+    int enemies_hit_idx[MAX_ENEMIES];
+    int enemies_hit_count;
     BulletKind kind;
 } Bullet;
 
@@ -96,6 +100,7 @@ typedef enum {
     SPELL_WATER_PILLAR,
     SPELL_WATER_WAVE,
     SPELL_ENERGY_HULL,
+    SPELL_PRECISE_SHOT,
 } SpellKind;
 
 typedef struct {
@@ -178,16 +183,18 @@ static void SpawnBurst(Vector2 pos, Color col, int count) {
         SpawnParticle(pos, col, 180.0f + rand()%120, 0.35f + (rand()%30)/100.0f, 4.0f);
 }
 
-static void FireBullet(Vector2 from, Vector2 dir, Color col) {
+static void FireBullet(Vector2 from, Vector2 dir, Color col, int size, BulletKind kind, float lifetime) {
     for (int i = 0; i < MAX_BULLETS; i++) {
         Bullet *b = &bullets[i];
         if (!b->active) {
             b->pos      = from;
             b->vel      = (Vector2){ dir.x*BULLET_SPEED, dir.y*BULLET_SPEED };
             b->active   = true;
-            b->lifetime = 4.5f;
+            b->lifetime = lifetime == 0 ? 4.5f : lifetime;
             b->color    = col;
-            b->size     = BULLET_SIZE;
+            b->size     = size;
+            b->kind     = kind;
+            b->enemies_hit_count = 0;
             return;
         }
     }
@@ -213,7 +220,7 @@ static void Init(void) {
     player.atkLockTimer   = 0;
     player.atkTargetIdx   = -1;
     player.moveBuffer     = (Vector2){0,0};
-    player.spellSelected  = SPELL_LIGHTNING_BOLT;
+    player.spellSelected  = SPELL_ENERGY_HULL;
 
     // Spawn dummy enemies in a rough ring
     int dummies_count = 6;
@@ -274,7 +281,7 @@ void handle_spells(Player* p, float dt) {
                 Vector2 mp = GetMousePosition();
                 Vector2 p_to_mp = {mp.x - p->pos.x , mp.y - p->pos.y};
                 Vector2 p_to_mp_norm = V2Norm(p_to_mp);
-                FireBullet(p->pos, p_to_mp_norm,(Color){255,80,200,255});
+                FireBullet(p->pos, p_to_mp_norm,(Color){255,80,200,255}, BULLET_NORMAL, BULLET_NORMAL, 0.f);
                 p->crossCooldown = CROSS_COOLDOWN;
                 screenShake = 0.3f;
                 }
@@ -305,6 +312,39 @@ void handle_spells(Player* p, float dt) {
             case SPELL_BERSERK:
                 {
                 Vector2 pos = p->pos;
+                float fmod_x = fmod(pos.x, SQUARE_SIZEf);
+                float fmod_y = fmod(pos.y, SQUARE_SIZEf);
+                Vector2 point = { pos.x - fmod_x, pos.y - fmod_y};
+                Color c = (Color){ 230, 41, 55, 150 };
+                Rectangle r = {point.x - SQUARE_SIZE, point.y - SQUARE_SIZE, 3*SQUARE_SIZE, 3*SQUARE_SIZE};
+                for (int i = 0; i < MAX_ENEMIES; i++) {
+                    Enemy* e = &enemies[i]; 
+                    if(!e->active){
+                        continue;
+                    } 
+                    if(CheckCollisionRecs(r, EntityRect(e->pos, ENEMY_SIZE))){
+                        printf("e collided! type = %d", e->type );
+                        e->hp -= 10; 
+                    }
+                }
+                p->crossCooldown = CROSS_COOLDOWN;
+                screenShake = 0.3f;
+                }
+                break;
+
+            case SPELL_ENERGY_HULL:
+                {
+                Vector2 mp = GetMousePosition();
+                Vector2 p_to_mp = {mp.x - p->pos.x , mp.y - p->pos.y};
+                Vector2 p_to_mp_norm = V2Norm(p_to_mp);
+                FireBullet(p->pos, p_to_mp_norm,(Color){255,80,200,255}, 100, BULLET_PIERCING, 0.4f);
+                p->crossCooldown = CROSS_COOLDOWN;
+                screenShake = 0.3f;
+                }
+                break;
+            case SPELL_WATER_PILLAR:
+                {
+                Vector2 pos = GetMousePosition();
                 float fmod_x = fmod(pos.x, SQUARE_SIZEf);
                 float fmod_y = fmod(pos.y, SQUARE_SIZEf);
                 Vector2 point = { pos.x - fmod_x, pos.y - fmod_y};
@@ -578,16 +618,35 @@ void handle_bullets(float dt){
         if (b->lifetime <= 0 || b->pos.x < 0 || b->pos.x > SCREEN_W ||
             b->pos.y < 0 || b->pos.y > SCREEN_H) {
             b->active = false;
+            b->enemies_hit_count = 0;
             continue;
         }
         Rectangle br = EntityRect(b->pos, b->size);
         for (int j = 0; j < MAX_ENEMIES; j++) {
             Enemy *e = &enemies[j];
             if (!e->active) continue;
+            bool was_hit_already = false;
             if (CheckCollisionRecs(br, EntityRect(e->pos, ENEMY_SIZE))) {
+                // TODO: cleanup after enemies are hit
+                for(int x = 0; x < b->enemies_hit_count; x++){
+                    int eIdx = b->enemies_hit_idx[x];
+                    if(eIdx == j){
+                        was_hit_already = true;
+                        break;
+                    }
+                } 
+                if(was_hit_already){
+                    continue;
+                } else {
+                    b->enemies_hit_idx[b->enemies_hit_count] = j;
+                    b->enemies_hit_count += 1;
+                }
                 e->hp -= 10;
                 e->flashTimer = 0.1f;
-                b->active = false;
+                if(b->kind == BULLET_NORMAL){
+                    b->active = false;
+                    b->enemies_hit_count = 0;
+                }
                 SpawnBurst(e->pos, WHITE, 6);
                 screenShake = 0.15f;
                 if (e->hp <= 0) {
@@ -601,12 +660,10 @@ void handle_bullets(float dt){
             }
         }
     }
-
 }
 
 // ─── Update ───────────────────────────────────────────────────────────────────
 static void Update(float dt) {
-
     handle_player_stuff(dt);
     handle_enemies(dt);
     handle_bullets(dt);
@@ -624,18 +681,21 @@ void handle_draw_spell_preview(){
             Vector2 from = player.pos;
             Vector2 to = mp;
             Vector2 full_dir = (Vector2){from.x - to.x, from.y - to.y};
-            if(abs(V2Len(full_dir)) > 300.f) {
+            float length = V2Len(full_dir);
+            if(abs(length) > 300.f) {
                 Vector2 toN = V2Norm(to);
-                to = V2Sum(to, V2Scale(V2Norm(full_dir), V2Len(full_dir) - 300.f));
+                length = V2Len(full_dir) - 300.f;
+                to = V2Sum(to, V2Scale(V2Norm(full_dir), length));
             }
             Vector2 dir = V2Scale(V2Norm(full_dir), 5.f);
             Vector2 r1 = {dir.y, -dir.x};
             Vector2 r2 = {-dir.y, dir.x};
 
+            // 2 main parallel lines
             DrawLineEx(V2Sum(from, r1), V2Sum(to, r1), 1.f, lc);
             DrawLineEx(V2Sum(from, r2), V2Sum(to, r2), 1.f, lc);
+
             float spacing = 12.f;
-            float length  = V2Len(full_dir);
             Vector2 along = V2Norm(full_dir);
             int steps     = (int)(length / spacing);
 
@@ -706,6 +766,27 @@ void handle_draw_spell_preview(){
             }
             break;
 
+        case SPELL_WATER_PILLAR:
+            {
+            Vector2 pos = GetMousePosition();
+            float fmod_x = fmod(pos.x, SQUARE_SIZEf);
+            float fmod_y = fmod(pos.y, SQUARE_SIZEf);
+            Vector2 p = { pos.x - fmod_x, pos.y - fmod_y};
+            Color c = (Color){ 230, 41, 55, 150 };
+            Rectangle r = {p.x, p.y, SQUARE_SIZE, SQUARE_SIZE};
+            for (int i = -1; i < 2; i++){
+                for (int j = -1; j < 2; j++){
+                    Rectangle nr = {
+                            p.x + i*SQUARE_SIZE + SQUARE_PAD, 
+                            p.y + j*SQUARE_SIZE + SQUARE_PAD, 
+                            SQUARE_SIZE - SQUARE_PAD, 
+                            SQUARE_SIZE - SQUARE_PAD
+                        };
+                    DrawRectangleRounded(nr, .3f, 0, c);
+                }
+            }
+            }
+            break;
 
         default:
             break;
@@ -713,6 +794,18 @@ void handle_draw_spell_preview(){
 }
 
 // ─── Draw ─────────────────────────────────────────────────────────────────────
+static void draw_bullets(Vector2 shake) {
+    for (int i = 0; i < MAX_BULLETS; i++) {
+        Bullet *b = &bullets[i];
+        if (!b->active) continue;
+        DrawRectangle((int)(b->pos.x - b->size/2 + shake.x),
+                      (int)(b->pos.y - b->size/2 + shake.y),
+                      (int)b->size, (int)b->size, b->color);
+        DrawRectangle((int)(b->pos.x - b->size/2 - 2 + shake.x),
+                      (int)(b->pos.y - b->size/2 - 2 + shake.y),
+                      (int)b->size+4, (int)b->size+4, Fade(b->color, 0.2f));
+    }
+}
 static void Draw(void) {
     float fullAtkDuration = 2.0f / player.atkSpeed;
     float windupDuration  = fullAtkDuration * 0.10f;
@@ -812,16 +905,7 @@ static void Draw(void) {
     }
 
     // ── Bullets ───────────────────────────────────────────────────────────────
-    for (int i = 0; i < MAX_BULLETS; i++) {
-        Bullet *b = &bullets[i];
-        if (!b->active) continue;
-        DrawRectangle((int)(b->pos.x - b->size/2 + shake.x),
-                      (int)(b->pos.y - b->size/2 + shake.y),
-                      (int)b->size, (int)b->size, b->color);
-        DrawRectangle((int)(b->pos.x - b->size/2 - 2 + shake.x),
-                      (int)(b->pos.y - b->size/2 - 2 + shake.y),
-                      (int)b->size+4, (int)b->size+4, Fade(b->color, 0.2f));
-    }
+    draw_bullets(shake);
 
     // ── Player ────────────────────────────────────────────────────────────────
     Color playerCol = RED;
