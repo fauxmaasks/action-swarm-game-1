@@ -101,6 +101,7 @@ typedef enum {
     SPELL_WATER_WAVE,
     SPELL_ENERGY_HULL,
     SPELL_PRECISE_SHOT,
+    SPELL_CONQUEST_JUDGEMENT,
 } SpellKind;
 
 typedef struct {
@@ -200,8 +201,22 @@ static void FireBullet(Vector2 from, Vector2 dir, Color col, int size, BulletKin
     }
 }
 
-void SpawnAtkArea(Shape2D shape, Vector2 pos){
-    
+
+Vector2 WorldToScreen(float wx, float wy, float tileW, float tileH, Vector2 camera) {
+    return (Vector2){
+        .x = (wx - wy) * (tileW * 0.5f) + camera.x,
+        .y = (wx + wy) * (tileH * 0.5f) + camera.y
+    };
+}
+
+// Optional inverse (for mouse picking / clicking on the world)
+Vector2 ScreenToWorld(float sx, float sy, float tileW, float tileH, Vector2 camera) {
+    float dx = sx - camera.x;
+    float dy = sy - camera.y;
+    return (Vector2){
+        .x = (dx / (tileW * 0.5f) + dy / (tileH * 0.5f)) * 0.5f,
+        .y = (dy / (tileH * 0.5f) - dx / (tileW * 0.5f)) * 0.5f
+    };
 }
 
 // ─── Init ─────────────────────────────────────────────────────────────────────
@@ -220,7 +235,7 @@ static void Init(void) {
     player.atkLockTimer   = 0;
     player.atkTargetIdx   = -1;
     player.moveBuffer     = (Vector2){0,0};
-    player.spellSelected  = SPELL_ENERGY_HULL;
+    player.spellSelected  = SPELL_CONQUEST_JUDGEMENT;
 
     // Spawn dummy enemies in a rough ring
     int dummies_count = 6;
@@ -274,100 +289,132 @@ static void Init(void) {
 
 void handle_spells(Player* p, float dt) {
     if (p->crossCooldown > 0) p->crossCooldown -= dt;
-    if (IsMouseButtonPressed(MOUSE_BUTTON_RIGHT) && p->crossCooldown <= 0) {
-        switch(p->spellSelected) {
-            case SPELL_LIGHTNING_BOLT:
-                {
-                Vector2 mp = GetMousePosition();
-                Vector2 p_to_mp = {mp.x - p->pos.x , mp.y - p->pos.y};
-                Vector2 p_to_mp_norm = V2Norm(p_to_mp);
-                FireBullet(p->pos, p_to_mp_norm,(Color){255,80,200,255}, BULLET_NORMAL, BULLET_NORMAL, 0.f);
-                p->crossCooldown = CROSS_COOLDOWN;
-                screenShake = 0.3f;
-                }
-                break;
-            
-            case SPELL_CONJURE_FIRE:
-                {
-                Vector2 mp = GetMousePosition();
-                float fmod_x = fmod(mp.x, SQUARE_SIZEf);
-                float fmod_y = fmod(mp.y, SQUARE_SIZEf);
-                Vector2 point = { mp.x - fmod_x, mp.y - fmod_y};
-                Rectangle r = {point.x, point.y, SQUARE_SIZE, SQUARE_SIZE};
-                for (int i = 0; i < MAX_ENEMIES; i++) {
-                    Enemy* e = &enemies[i]; 
-                    if(!e->active){
-                        continue;
-                    } 
-                    if(CheckCollisionRecs(r, EntityRect(e->pos, ENEMY_SIZE + 6))){
-                        printf("e collided! type = %d", e->type );
-                        e->hp -= 10; 
-                    }
-                }
-                p->crossCooldown = CROSS_COOLDOWN;
-                screenShake = 0.3f;
-                }
-                break;
-
-            case SPELL_BERSERK:
-                {
-                Vector2 pos = p->pos;
-                float fmod_x = fmod(pos.x, SQUARE_SIZEf);
-                float fmod_y = fmod(pos.y, SQUARE_SIZEf);
-                Vector2 point = { pos.x - fmod_x, pos.y - fmod_y};
-                Color c = (Color){ 230, 41, 55, 150 };
-                Rectangle r = {point.x - SQUARE_SIZE, point.y - SQUARE_SIZE, 3*SQUARE_SIZE, 3*SQUARE_SIZE};
-                for (int i = 0; i < MAX_ENEMIES; i++) {
-                    Enemy* e = &enemies[i]; 
-                    if(!e->active){
-                        continue;
-                    } 
-                    if(CheckCollisionRecs(r, EntityRect(e->pos, ENEMY_SIZE))){
-                        printf("e collided! type = %d", e->type );
-                        e->hp -= 10; 
-                    }
-                }
-                p->crossCooldown = CROSS_COOLDOWN;
-                screenShake = 0.3f;
-                }
-                break;
-
-            case SPELL_ENERGY_HULL:
-                {
-                Vector2 mp = GetMousePosition();
-                Vector2 p_to_mp = {mp.x - p->pos.x , mp.y - p->pos.y};
-                Vector2 p_to_mp_norm = V2Norm(p_to_mp);
-                FireBullet(p->pos, p_to_mp_norm,(Color){255,80,200,255}, 100, BULLET_PIERCING, 0.4f);
-                p->crossCooldown = CROSS_COOLDOWN;
-                screenShake = 0.3f;
-                }
-                break;
-            case SPELL_WATER_PILLAR:
-                {
-                Vector2 pos = GetMousePosition();
-                float fmod_x = fmod(pos.x, SQUARE_SIZEf);
-                float fmod_y = fmod(pos.y, SQUARE_SIZEf);
-                Vector2 point = { pos.x - fmod_x, pos.y - fmod_y};
-                Color c = (Color){ 230, 41, 55, 150 };
-                Rectangle r = {point.x - SQUARE_SIZE, point.y - SQUARE_SIZE, 3*SQUARE_SIZE, 3*SQUARE_SIZE};
-                for (int i = 0; i < MAX_ENEMIES; i++) {
-                    Enemy* e = &enemies[i]; 
-                    if(!e->active){
-                        continue;
-                    } 
-                    if(CheckCollisionRecs(r, EntityRect(e->pos, ENEMY_SIZE))){
-                        printf("e collided! type = %d", e->type );
-                        e->hp -= 10; 
-                    }
-                }
-                p->crossCooldown = CROSS_COOLDOWN;
-                screenShake = 0.3f;
-                }
-                break;
-
-            default:
-                break;
+    if (!(IsMouseButtonPressed(MOUSE_BUTTON_RIGHT) && p->crossCooldown <= 0)) {
+        // mouse not clicked or still on cd
+        return;
+    }
+    switch(p->spellSelected) {
+    case SPELL_LIGHTNING_BOLT:
+        {
+        Vector2 mp = GetMousePosition();
+        Vector2 p_to_mp = {mp.x - p->pos.x , mp.y - p->pos.y};
+        Vector2 p_to_mp_norm = V2Norm(p_to_mp);
+        FireBullet(p->pos, p_to_mp_norm,(Color){255,80,200,255}, BULLET_NORMAL, BULLET_NORMAL, 0.f);
+        p->crossCooldown = CROSS_COOLDOWN;
+        screenShake = 0.3f;
         }
+        break;
+    
+    case SPELL_CONJURE_FIRE:
+        {
+        Vector2 mp = GetMousePosition();
+        float fmod_x = fmod(mp.x, SQUARE_SIZEf);
+        float fmod_y = fmod(mp.y, SQUARE_SIZEf);
+        Vector2 point = { mp.x - fmod_x, mp.y - fmod_y};
+        Rectangle r = {point.x, point.y, SQUARE_SIZE, SQUARE_SIZE};
+        for (int i = 0; i < MAX_ENEMIES; i++) {
+            Enemy* e = &enemies[i]; 
+            if(!e->active){
+                continue;
+            } 
+            if(CheckCollisionRecs(r, EntityRect(e->pos, ENEMY_SIZE + 6))){
+                printf("e collided! type = %d", e->type );
+                e->hp -= 10; 
+            }
+        }
+        p->crossCooldown = CROSS_COOLDOWN;
+        screenShake = 0.3f;
+        }
+        break;
+
+    case SPELL_BERSERK:
+        {
+        Vector2 pos = p->pos;
+        float fmod_x = fmod(pos.x, SQUARE_SIZEf);
+        float fmod_y = fmod(pos.y, SQUARE_SIZEf);
+        Vector2 point = { pos.x - fmod_x, pos.y - fmod_y};
+        Color c = (Color){ 230, 41, 55, 150 };
+        Rectangle r = {point.x - SQUARE_SIZE, point.y - SQUARE_SIZE, 3*SQUARE_SIZE, 3*SQUARE_SIZE};
+        for (int i = 0; i < MAX_ENEMIES; i++) {
+            Enemy* e = &enemies[i]; 
+            if(!e->active){
+                continue;
+            } 
+            if(CheckCollisionRecs(r, EntityRect(e->pos, ENEMY_SIZE))){
+                printf("e collided! type = %d", e->type );
+                e->hp -= 10; 
+            }
+        }
+        p->crossCooldown = CROSS_COOLDOWN;
+        screenShake = 0.3f;
+        }
+        break;
+
+    case SPELL_ENERGY_HULL:
+        {
+        Vector2 mp = GetMousePosition();
+        Vector2 p_to_mp = {mp.x - p->pos.x , mp.y - p->pos.y};
+        Vector2 p_to_mp_norm = V2Norm(p_to_mp);
+        FireBullet(p->pos, p_to_mp_norm,(Color){255,80,200,255}, 100, BULLET_PIERCING, 0.4f);
+        p->crossCooldown = CROSS_COOLDOWN;
+        screenShake = 0.3f;
+        }
+        break;
+    case SPELL_WATER_PILLAR:
+        {
+        Vector2 pos = GetMousePosition();
+        float fmod_x = fmod(pos.x, SQUARE_SIZEf);
+        float fmod_y = fmod(pos.y, SQUARE_SIZEf);
+        Vector2 point = { pos.x - fmod_x, pos.y - fmod_y};
+        Color c = (Color){ 230, 41, 55, 150 };
+        Rectangle r = {point.x - SQUARE_SIZE, point.y - SQUARE_SIZE, 3*SQUARE_SIZE, 3*SQUARE_SIZE};
+        for (int i = 0; i < MAX_ENEMIES; i++) {
+            Enemy* e = &enemies[i]; 
+            if(!e->active){
+                continue;
+            } 
+            if(CheckCollisionRecs(r, EntityRect(e->pos, ENEMY_SIZE))){
+                printf("e collided! type = %d", e->type );
+                e->hp -= 10; 
+            }
+        }
+        p->crossCooldown = CROSS_COOLDOWN;
+        screenShake = 0.3f;
+        }
+        break;
+    case SPELL_CONQUEST_JUDGEMENT:
+        {
+        Vector2 pos = player.pos;
+        float fmod_x = fmod(pos.x, SQUARE_SIZEf);
+        float fmod_y = fmod(pos.y, SQUARE_SIZEf);
+        Vector2 p = { pos.x - fmod_x, pos.y - fmod_y};
+        for (int i = -6; i < 7; i+=2){
+            for (int j = -6; j < 7; j+=2){
+                if (abs(i) + abs(j) > 8 || (i == 0 && j == 0)) continue;
+                for (int k = 0; k < MAX_ENEMIES; k++) {
+                    Enemy* e = &enemies[k]; 
+                    if(!e->active){
+                        continue;
+                    } 
+                    Rectangle r = {
+                            p.x + i*SQUARE_SIZE,
+                            p.y + j*SQUARE_SIZE,
+                            SQUARE_SIZE,
+                            SQUARE_SIZE
+                        };
+                    if(CheckCollisionRecs(r, EntityRect(e->pos, ENEMY_SIZE))){
+                        printf("e collided! type = %d", e->type);
+                        e->hp -= 10; 
+                    }
+                }
+            }
+        }
+        }
+        break;
+
+    default:
+        break;
+    
     }
 }
 
@@ -674,122 +721,145 @@ void handle_draw_spell_preview(){
 
     Vector2 mp = GetMousePosition();
     switch(player.spellSelected){
-        case SPELL_LIGHTNING_BOLT:
-            {
-            // float alpha = atkLineTimer / ATK_LINE_DURATION;
-            Color lc = Fade(WHITE, 0.85f);
-            Vector2 from = player.pos;
-            Vector2 to = mp;
-            Vector2 full_dir = (Vector2){from.x - to.x, from.y - to.y};
-            float length = V2Len(full_dir);
-            if(abs(length) > 300.f) {
-                Vector2 toN = V2Norm(to);
-                length = V2Len(full_dir) - 300.f;
-                to = V2Sum(to, V2Scale(V2Norm(full_dir), length));
+
+    case SPELL_LIGHTNING_BOLT:
+        {
+        // float alpha = atkLineTimer / ATK_LINE_DURATION;
+        Color lc = Fade(WHITE, 0.85f);
+        Vector2 from = player.pos;
+        Vector2 to = mp;
+        Vector2 full_dir = (Vector2){from.x - to.x, from.y - to.y};
+        float length = V2Len(full_dir);
+        if(abs(length) > 300.f) {
+            Vector2 toN = V2Norm(to);
+            length = V2Len(full_dir) - 300.f;
+            to = V2Sum(to, V2Scale(V2Norm(full_dir), length));
+        }
+        Vector2 dir = V2Scale(V2Norm(full_dir), 5.f);
+        Vector2 r1 = {dir.y, -dir.x};
+        Vector2 r2 = {-dir.y, dir.x};
+
+        // 2 main parallel lines
+        DrawLineEx(V2Sum(from, r1), V2Sum(to, r1), 1.f, lc);
+        DrawLineEx(V2Sum(from, r2), V2Sum(to, r2), 1.f, lc);
+
+        float spacing = 12.f;
+        Vector2 along = V2Norm(full_dir);
+        int steps     = (int)(length / spacing);
+
+        for (int i = 1; i < steps; i++) {
+            float t = i * spacing;
+            Vector2 center = V2Sum(from, V2Scale(along, -t));
+
+            // Always cross from r1 side to r2 side at the NEXT step along
+            Vector2 a = V2Sum(center, r1);
+            Vector2 b = V2Sum(V2Sum(center, V2Scale(along, -spacing)), r2);
+
+            DrawLineEx(a, b, 1.f, lc);
+        }
+
+        }
+
+        break;
+    case SPELL_CONJURE_FIRE:
+        {
+        float fmod_x = fmod(mp.x, SQUARE_SIZEf);
+        float fmod_y = fmod(mp.y, SQUARE_SIZEf);
+        Vector2 p = { mp.x - fmod_x, mp.y - fmod_y};
+        Rectangle r = {p.x + SQUARE_PAD, p.y + SQUARE_PAD, SQUARE_SIZE - SQUARE_PAD, SQUARE_SIZE - SQUARE_PAD};
+        Color c = (Color){ 230, 41, 55, 150 };
+        DrawRectangleRounded(r, .3f, 0, c);
+        }
+        break;
+
+    case SPELL_BERSERK:
+        {
+        Vector2 pos = player.pos;
+        float fmod_x = fmod(pos.x, SQUARE_SIZEf);
+        float fmod_y = fmod(pos.y, SQUARE_SIZEf);
+        Vector2 p = { pos.x - fmod_x, pos.y - fmod_y};
+        Color c = (Color){ 230, 41, 55, 150 };
+        Rectangle r = {p.x, p.y, SQUARE_SIZE, SQUARE_SIZE};
+        for (int i = -1; i < 2; i++){
+            for (int j = -1; j < 2; j++){
+                Rectangle nr = {
+                        p.x + i*SQUARE_SIZE + SQUARE_PAD, 
+                        p.y + j*SQUARE_SIZE + SQUARE_PAD, 
+                        SQUARE_SIZE - SQUARE_PAD, 
+                        SQUARE_SIZE - SQUARE_PAD
+                    };
+                DrawRectangleRounded(nr, .3f, 0, c);
             }
-            Vector2 dir = V2Scale(V2Norm(full_dir), 5.f);
-            Vector2 r1 = {dir.y, -dir.x};
-            Vector2 r2 = {-dir.y, dir.x};
+        }
+        }
+        break;
 
-            // 2 main parallel lines
-            DrawLineEx(V2Sum(from, r1), V2Sum(to, r1), 1.f, lc);
-            DrawLineEx(V2Sum(from, r2), V2Sum(to, r2), 1.f, lc);
+    case SPELL_ENERGY_HULL:
+        {
+        Color lc = Fade(WHITE, 0.85f);
+        Vector2 from = player.pos;
+        Vector2 to = mp;
+        Vector2 full_dir = (Vector2){from.x - to.x, from.y - to.y};
+        if(abs(V2Len(full_dir)) > 200.f) {
+            Vector2 toN = V2Norm(to);
+            to = V2Sum(to, V2Scale(V2Norm(full_dir), V2Len(full_dir) - 200.f));
+        }
 
-            float spacing = 12.f;
-            Vector2 along = V2Norm(full_dir);
-            int steps     = (int)(length / spacing);
+        Vector2 dir = V2Scale(V2Norm(full_dir), 30.f);
+        Vector2 r1 = {dir.y, -dir.x};
+        Vector2 r2 = {-dir.y, dir.x};
 
-            for (int i = 1; i < steps; i++) {
-                float t = i * spacing;
-                Vector2 center = V2Sum(from, V2Scale(along, -t));
+        DrawLineEx(V2Sum(from, r1), V2Sum(to, r1), 1.f, lc);
+        DrawLineEx(V2Sum(from, r2), V2Sum(to, r2), 1.f, lc);
+        }
+        break;
 
-                // Always cross from r1 side to r2 side at the NEXT step along
-                Vector2 a = V2Sum(center, r1);
-                Vector2 b = V2Sum(V2Sum(center, V2Scale(along, -spacing)), r2);
-
-                DrawLineEx(a, b, 1.f, lc);
+    case SPELL_WATER_PILLAR:
+        {
+        Vector2 pos = GetMousePosition();
+        float fmod_x = fmod(pos.x, SQUARE_SIZEf);
+        float fmod_y = fmod(pos.y, SQUARE_SIZEf);
+        Vector2 p = { pos.x - fmod_x, pos.y - fmod_y};
+        Color c = (Color){ 230, 41, 55, 150 };
+        Rectangle r = {p.x, p.y, SQUARE_SIZE, SQUARE_SIZE};
+        for (int i = -1; i < 2; i++){
+            for (int j = -1; j < 2; j++){
+                Rectangle nr = {
+                        p.x + i*SQUARE_SIZE + SQUARE_PAD, 
+                        p.y + j*SQUARE_SIZE + SQUARE_PAD, 
+                        SQUARE_SIZE - SQUARE_PAD, 
+                        SQUARE_SIZE - SQUARE_PAD
+                    };
+                DrawRectangleRounded(nr, .3f, 0, c);
             }
+        }
+        }
+        break;
 
-            }
+    case SPELL_CONQUEST_JUDGEMENT:
+    {
+    Vector2 pos = player.pos;
+    float fmod_x = fmod(pos.x, SQUARE_SIZEf);
+    float fmod_y = fmod(pos.y, SQUARE_SIZEf);
+    Vector2 p = { pos.x - fmod_x, pos.y - fmod_y};
+    Color c = (Color){ 230, 41, 55, 150 };
+    for (int i = -6; i < 7; i+=2){
+        for (int j = -6; j < 7; j+=2){
+            if (abs(i) + abs(j) > 8 || (i == 0 && j == 0)) continue;
 
-            break;
-        case SPELL_CONJURE_FIRE:
-            {
-            float fmod_x = fmod(mp.x, SQUARE_SIZEf);
-            float fmod_y = fmod(mp.y, SQUARE_SIZEf);
-            Vector2 p = { mp.x - fmod_x, mp.y - fmod_y};
-            Rectangle r = {p.x + SQUARE_PAD, p.y + SQUARE_PAD, SQUARE_SIZE - SQUARE_PAD, SQUARE_SIZE - SQUARE_PAD};
-            Color c = (Color){ 230, 41, 55, 150 };
-            DrawRectangleRounded(r, .3f, 0, c);
-            }
-            break;
+            Rectangle nr = {
+                    p.x + i*SQUARE_SIZE + SQUARE_PAD, 
+                    p.y + j*SQUARE_SIZE + SQUARE_PAD, 
+                    SQUARE_SIZE - SQUARE_PAD, 
+                    SQUARE_SIZE - SQUARE_PAD
+                };
+            DrawRectangleRounded(nr, .3f, 0, c);
+        }
+    }
+    }
 
-        case SPELL_BERSERK:
-            {
-            Vector2 pos = player.pos;
-            float fmod_x = fmod(pos.x, SQUARE_SIZEf);
-            float fmod_y = fmod(pos.y, SQUARE_SIZEf);
-            Vector2 p = { pos.x - fmod_x, pos.y - fmod_y};
-            Color c = (Color){ 230, 41, 55, 150 };
-            Rectangle r = {p.x, p.y, SQUARE_SIZE, SQUARE_SIZE};
-            for (int i = -1; i < 2; i++){
-                for (int j = -1; j < 2; j++){
-                    Rectangle nr = {
-                            p.x + i*SQUARE_SIZE + SQUARE_PAD, 
-                            p.y + j*SQUARE_SIZE + SQUARE_PAD, 
-                            SQUARE_SIZE - SQUARE_PAD, 
-                            SQUARE_SIZE - SQUARE_PAD
-                        };
-                    DrawRectangleRounded(nr, .3f, 0, c);
-                }
-            }
-            }
-            break;
-
-        case SPELL_ENERGY_HULL:
-            {
-            Color lc = Fade(WHITE, 0.85f);
-            Vector2 from = player.pos;
-            Vector2 to = mp;
-            Vector2 full_dir = (Vector2){from.x - to.x, from.y - to.y};
-            if(abs(V2Len(full_dir)) > 200.f) {
-                Vector2 toN = V2Norm(to);
-                to = V2Sum(to, V2Scale(V2Norm(full_dir), V2Len(full_dir) - 200.f));
-            }
-
-            Vector2 dir = V2Scale(V2Norm(full_dir), 30.f);
-            Vector2 r1 = {dir.y, -dir.x};
-            Vector2 r2 = {-dir.y, dir.x};
-
-            DrawLineEx(V2Sum(from, r1), V2Sum(to, r1), 1.f, lc);
-            DrawLineEx(V2Sum(from, r2), V2Sum(to, r2), 1.f, lc);
-            }
-            break;
-
-        case SPELL_WATER_PILLAR:
-            {
-            Vector2 pos = GetMousePosition();
-            float fmod_x = fmod(pos.x, SQUARE_SIZEf);
-            float fmod_y = fmod(pos.y, SQUARE_SIZEf);
-            Vector2 p = { pos.x - fmod_x, pos.y - fmod_y};
-            Color c = (Color){ 230, 41, 55, 150 };
-            Rectangle r = {p.x, p.y, SQUARE_SIZE, SQUARE_SIZE};
-            for (int i = -1; i < 2; i++){
-                for (int j = -1; j < 2; j++){
-                    Rectangle nr = {
-                            p.x + i*SQUARE_SIZE + SQUARE_PAD, 
-                            p.y + j*SQUARE_SIZE + SQUARE_PAD, 
-                            SQUARE_SIZE - SQUARE_PAD, 
-                            SQUARE_SIZE - SQUARE_PAD
-                        };
-                    DrawRectangleRounded(nr, .3f, 0, c);
-                }
-            }
-            }
-            break;
-
-        default:
-            break;
+    default:
+        break;
     }
 }
 

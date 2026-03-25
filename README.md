@@ -1,3 +1,9 @@
+## where left off
+- doing the judgement atk dmg
+- make an enemy do the atk every x seconds
+- make enemy move in a random manner
+
+
 # What's in the game:
 FeatureDetails 
 - Player - Red square, moves with WASD
@@ -21,4 +27,4 @@ FeatureDetails
     
 - different ones
     - arc atk
-    - atk is in a line but dmg is dealt in pieces (kinda like demon from thyranya lightning atk)
+    - atk is in a line that ticks in chain
