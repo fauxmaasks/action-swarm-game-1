@@ -10,8 +10,8 @@
 #endif
 
 // ─── Constants ───────────────────────────────────────────────────────────────
-#define SCREEN_W        1280
-#define SCREEN_H        720
+#define SCREEN_W        1900
+#define SCREEN_H        980
 #define PLAYER_SIZE     28
 #define ENEMY_SIZE      28
 #define BULLET_SIZE     18
@@ -29,9 +29,11 @@
 #define MAX_PARTICLES   256
 #define PERCENT_WINDUP 0.10f
 #define PERCENT_LOCK 0.90f
-#define SQUARE_SIZE 48
+#define TILE_W 64.0f
+#define TILE_H 32.0f
+#define SQUARE_SIZE 64
 #define SQUARE_PAD 4
-#define SQUARE_SIZEf 48.0f
+#define SQUARE_SIZEf 64.0f
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 typedef enum {
@@ -201,11 +203,10 @@ static void FireBullet(Vector2 from, Vector2 dir, Color col, int size, BulletKin
     }
 }
 
-
-Vector2 WorldToScreen(float wx, float wy, float tileW, float tileH, Vector2 camera) {
+Vector2 WorldToScreen(float wx, float wy, Vector2 camera) {
     return (Vector2){
-        .x = (wx - wy) * (tileW * 0.5f) + camera.x,
-        .y = (wx + wy) * (tileH * 0.5f) + camera.y
+        .x = (wx - wy) * (TILE_W * 0.5f) + camera.x,
+        .y = (wx + wy) * (TILE_H * 0.5f) + camera.y
     };
 }
 
@@ -235,7 +236,7 @@ static void Init(void) {
     player.atkLockTimer   = 0;
     player.atkTargetIdx   = -1;
     player.moveBuffer     = (Vector2){0,0};
-    player.spellSelected  = SPELL_CONQUEST_JUDGEMENT;
+    player.spellSelected  = SPELL_NONE;
 
     // Spawn dummy enemies in a rough ring
     int dummies_count = 6;
@@ -891,10 +892,25 @@ static void Draw(void) {
     ClearBackground((Color){18, 18, 28, 255});
 
     // Subtle grid
-    for (int x = 0; x < SCREEN_W; x += SQUARE_SIZE)
-        DrawLine(x + (int)shake.x, 0, x + (int)shake.x, SCREEN_H, (Color){30,30,50,255});
-    for (int y = 0; y < SCREEN_H; y += SQUARE_SIZE)
-        DrawLine(0, y + (int)shake.y, SCREEN_W, y + (int)shake.y, (Color){30,30,50,255});
+    Vector2 cam = {SCREEN_W*0.5f, SCREEN_H*0.25f};
+    for (int x = 0; x < SCREEN_W/SQUARE_SIZE; x++){
+        Vector2 top = WorldToScreen(x, 0, cam);
+        Vector2 bot = WorldToScreen(x, SCREEN_H, cam);
+        DrawLine(top.x,
+                 top.y, 
+                 bot.x, 
+                 bot.y, 
+                 (Color){130,30,50,255});
+    }
+    for (int y = 0; y < SCREEN_H/SQUARE_SIZE; y++){
+        Vector2 left = WorldToScreen(0, y, cam);
+        Vector2 right = WorldToScreen(SCREEN_W, y, cam);
+        DrawLine(left.x, 
+                 left.y, 
+                 right.x, 
+                 right.y, 
+                 (Color){30,230,50,255});
+    }
 
     // ── Draw line to selected target ─────────────────────────────────────────
     if (player.atkTargetIdx >= 0 && enemies[player.atkTargetIdx].active) {
