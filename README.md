@@ -1,5 +1,5 @@
 ## where left off
-- doing the judgement atk dmg
+- make more cool spells
 - make an enemy do the atk every x seconds
 - make enemy move in a random manner
 

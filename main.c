@@ -29,11 +29,17 @@
 #define MAX_PARTICLES   256
 #define PERCENT_WINDUP 0.10f
 #define PERCENT_LOCK 0.90f
-#define TILE_W 64.0f
-#define TILE_H 32.0f
+
+#define TILE_W 128.0f
+#define TILE_H 64.0f
 #define SQUARE_SIZE 64
 #define SQUARE_PAD 4
 #define SQUARE_SIZEf 64.0f
+
+#define WAVE_STEPS 90
+#define WAVE_LENGTH 420.0f
+#define WAVE_AMPLITUDE 2.0f
+#define WAVE_FREQUENCY 12.0f
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 typedef enum {
@@ -104,6 +110,7 @@ typedef enum {
     SPELL_ENERGY_HULL,
     SPELL_PRECISE_SHOT,
     SPELL_CONQUEST_JUDGEMENT,
+    SPELL_WAVY_SHOT,
 } SpellKind;
 
 typedef struct {
@@ -131,6 +138,7 @@ typedef struct {
 
 // ─── Globals ──────────────────────────────────────────────────────────────────
 static Player   player;
+static Vector2 cam = {SCREEN_W*0.5f, SCREEN_H*0.1f};
 static Bullet   bullets[MAX_BULLETS];
 static Enemy    enemies[MAX_ENEMIES];
 static Particle particles[MAX_PARTICLES];
@@ -203,23 +211,6 @@ static void FireBullet(Vector2 from, Vector2 dir, Color col, int size, BulletKin
     }
 }
 
-Vector2 WorldToScreen(float wx, float wy, Vector2 camera) {
-    return (Vector2){
-        .x = (wx - wy) * (TILE_W * 0.5f) + camera.x,
-        .y = (wx + wy) * (TILE_H * 0.5f) + camera.y
-    };
-}
-
-// Optional inverse (for mouse picking / clicking on the world)
-Vector2 ScreenToWorld(float sx, float sy, float tileW, float tileH, Vector2 camera) {
-    float dx = sx - camera.x;
-    float dy = sy - camera.y;
-    return (Vector2){
-        .x = (dx / (tileW * 0.5f) + dy / (tileH * 0.5f)) * 0.5f,
-        .y = (dy / (tileH * 0.5f) - dx / (tileW * 0.5f)) * 0.5f
-    };
-}
-
 // ─── Init ─────────────────────────────────────────────────────────────────────
 static void Init(void) {
     player.pos            = (Vector2){SCREEN_W/2.0f, SCREEN_H/2.0f};
@@ -236,7 +227,7 @@ static void Init(void) {
     player.atkLockTimer   = 0;
     player.atkTargetIdx   = -1;
     player.moveBuffer     = (Vector2){0,0};
-    player.spellSelected  = SPELL_NONE;
+    player.spellSelected  = SPELL_WAVY_SHOT;
 
     // Spawn dummy enemies in a rough ring
     int dummies_count = 6;
@@ -437,6 +428,9 @@ void handle_player_stuff(float dt){
     if (IsKeyDown(KEY_A) || IsKeyDown(KEY_LEFT))   move.x -= 1;
     if (IsKeyDown(KEY_D) || IsKeyDown(KEY_RIGHT))  move.x += 1;
     move = V2Norm(move);
+    cam.x = SCREEN_W * 0.5f - (player.pos.x - player.pos.y) * (TILE_W * 0.5f);
+    cam.y = SCREEN_H * 0.5f - (player.pos.x + player.pos.y) * (TILE_H * 0.5f);
+
 
     bool playerMoving = V2Len(move) > 0.1f;
 
@@ -858,6 +852,34 @@ void handle_draw_spell_preview(){
         }
     }
     }
+    case SPELL_WAVY_SHOT:
+    {
+    Vector2 dir = V2Norm((Vector2){mp.x - player.pos.x, mp.y - player.pos.y});
+    Vector2 perpendicular1 = {dir.y, -dir.x};
+    Vector2 perpendicular2 = {-dir.y, dir.x};
+    Vector2 prevPoint1 = {0};
+    Vector2 prevPoint2 = {0};
+    float GRID_SIZE = 50.f;
+    for(int i = 0; i <= WAVE_STEPS; i++){
+        float t = (float)i / WAVE_STEPS;
+        float dist = t * WAVE_LENGTH;
+        float offset = sinf(t * WAVE_FREQUENCY * 2.0f * PI) * WAVE_AMPLITUDE;
+
+        float x1 = player.pos.x + dir.x * dist + perpendicular1.x * offset;
+        float y1 = player.pos.y + dir.y * dist + perpendicular1.y * offset;
+        Vector2 p1 = {x1*GRID_SIZE, y1*GRID_SIZE};
+        float x2 = player.pos.x + dir.x * dist + perpendicular2.x * offset;
+        float y2 = player.pos.y + dir.y * dist + perpendicular2.y * offset;
+        Vector2 p2 = {x2*GRID_SIZE, y2*GRID_SIZE};
+        Color c = WHITE;
+        if (i > 0) {
+            DrawLineEx(prevPoint1, p1, 2.f, c);
+            DrawLineEx(prevPoint2, p2, 2.f, c);
+        }
+        prevPoint1 = p1;
+        prevPoint2 = p2;
+    }
+    }
 
     default:
         break;
@@ -892,24 +914,11 @@ static void Draw(void) {
     ClearBackground((Color){18, 18, 28, 255});
 
     // Subtle grid
-    Vector2 cam = {SCREEN_W*0.5f, SCREEN_H*0.25f};
-    for (int x = 0; x < SCREEN_W/SQUARE_SIZE; x++){
-        Vector2 top = WorldToScreen(x, 0, cam);
-        Vector2 bot = WorldToScreen(x, SCREEN_H, cam);
-        DrawLine(top.x,
-                 top.y, 
-                 bot.x, 
-                 bot.y, 
-                 (Color){130,30,50,255});
+    for (int x = 0; x < SCREEN_W; x+= SQUARE_SIZE){
+        DrawLine(x,0, x, SCREEN_H, (Color){30,30,50,255});
     }
-    for (int y = 0; y < SCREEN_H/SQUARE_SIZE; y++){
-        Vector2 left = WorldToScreen(0, y, cam);
-        Vector2 right = WorldToScreen(SCREEN_W, y, cam);
-        DrawLine(left.x, 
-                 left.y, 
-                 right.x, 
-                 right.y, 
-                 (Color){30,230,50,255});
+    for (int y = 0; y < SCREEN_H; y+= SQUARE_SIZE){
+        DrawLine(0,y, SCREEN_W, y, (Color){30,30,50,255});
     }
 
     // ── Draw line to selected target ─────────────────────────────────────────
