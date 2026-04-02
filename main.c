@@ -43,6 +43,13 @@
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 typedef enum {
+    ENEMY_AGRESSIVE,
+    ENEMY_PASSIVE,
+    ENEMY_RANGED,
+    ENEMY_IMMOBILE,
+} EnemyBehavior;
+
+typedef enum {
     SHAPE_NONE,
     SHAPE_RECT,
     SHAPE_CIRCLE,
@@ -74,15 +81,23 @@ typedef struct {
     BulletKind kind;
 } Bullet;
 
-typedef enum { ENEMY_DUMMY, ENEMY_RAT } EnemyType;
+typedef enum { ENEMY_DUMMY, ENEMY_RAT, ENEMY_RANGED_RAT } EnemyType;
 
 typedef struct {
     Vector2    pos;
+    Vector2    vel;
+    float      mvSpd;
     float      hp;
     float      maxHp;
     bool       active;
     EnemyType  type;
     float      flashTimer;
+
+    EnemyBehavior behaviorType;
+    bool isAggroed;
+    bool wasJustAttacked;
+    float aggroRadius;
+    float preferredDist;
 } Enemy;
 
 typedef struct {
@@ -153,6 +168,22 @@ static float    atkLineTimer = 0.0f;
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 static float V2Len(Vector2 v) { 
     return sqrtf(v.x*v.x + v.y*v.y); 
+}
+
+static float V2Dist(Vector2 v1, Vector2 v2){
+    float dx = v1.x - v2.x;
+    float dy = v1.y - v2.y;
+    return sqrtf(dx*dx + dy*dy); 
+}
+
+static Vector2 V2DirTo(Vector2 from, Vector2 to){
+    float dist = V2Dist(to, from);
+    if(dist < 0.0001f) return (Vector2){0, 0};
+
+    float dx = to.x - from.x;
+    float dy = to.y - from.y; 
+    
+    return (Vector2){dx / dist, dy / dist};
 }
 
 static Vector2 V2Norm(Vector2 v) {
@@ -227,7 +258,7 @@ static void Init(void) {
     player.atkLockTimer   = 0;
     player.atkTargetIdx   = -1;
     player.moveBuffer     = (Vector2){0,0};
-    player.spellSelected  = SPELL_WAVY_SHOT;
+    player.spellSelected  = SPELL_CONJURE_FIRE;
 
     // Spawn dummy enemies in a rough ring
     int dummies_count = 6;
@@ -240,6 +271,13 @@ static void Init(void) {
         enemies[i].active   = true;
         enemies[i].type     = ENEMY_DUMMY;
         enemies[i].flashTimer = 0;
+
+        enemies[i].mvSpd = 0;
+        enemies[i].behaviorType = ENEMY_PASSIVE;
+        enemies[i].isAggroed = false;
+        enemies[i].wasJustAttacked = false;
+        enemies[i].aggroRadius = 500.0f;
+        enemies[i].preferredDist = 300.0f;
     }
 
     // Spawn one rat
@@ -249,6 +287,44 @@ static void Init(void) {
     enemies[dummies_count].active    = true;
     enemies[dummies_count].type      = ENEMY_RAT;
     enemies[dummies_count].flashTimer= 0;
+
+    enemies[dummies_count].mvSpd = RAT_SPEED;
+    enemies[dummies_count].behaviorType = ENEMY_PASSIVE;
+    enemies[dummies_count].isAggroed = false;
+    enemies[dummies_count].wasJustAttacked = false;
+    enemies[dummies_count].aggroRadius = 800.0f;
+    enemies[dummies_count].preferredDist = 100.0f;
+    dummies_count++;
+
+    enemies[dummies_count].pos       = (Vector2){ 300, 100 };
+    enemies[dummies_count].hp        = 30;
+    enemies[dummies_count].maxHp     = 30;
+    enemies[dummies_count].active    = true;
+    enemies[dummies_count].type      = ENEMY_RANGED_RAT;
+    enemies[dummies_count].flashTimer= 0;
+
+    enemies[dummies_count].mvSpd = RAT_SPEED;
+    enemies[dummies_count].behaviorType = ENEMY_RANGED;
+    enemies[dummies_count].isAggroed = false;
+    enemies[dummies_count].wasJustAttacked = false;
+    enemies[dummies_count].aggroRadius = 800.0f;
+    enemies[dummies_count].preferredDist = 400.0f;
+
+    dummies_count++;
+
+    enemies[dummies_count].pos       = (Vector2){ 200, 100 };
+    enemies[dummies_count].hp        = 30;
+    enemies[dummies_count].maxHp     = 30;
+    enemies[dummies_count].active    = true;
+    enemies[dummies_count].type      = ENEMY_RAT;
+    enemies[dummies_count].flashTimer= 0;
+
+    enemies[dummies_count].mvSpd = RAT_SPEED;
+    enemies[dummies_count].behaviorType = ENEMY_PASSIVE;
+    enemies[dummies_count].isAggroed = false;
+    enemies[dummies_count].wasJustAttacked = false;
+    enemies[dummies_count].aggroRadius = 1000.0f;
+    enemies[dummies_count].preferredDist = 400.0f;
     // Clear the rest
     for (int i = dummies_count+1; i < MAX_ENEMIES; i++) enemies[i].active = false;
 
@@ -410,6 +486,22 @@ void handle_spells(Player* p, float dt) {
     }
 }
 
+void on_enemy_attacked(Enemy* e) {
+    e->isAggroed = true; 
+    e->wasJustAttacked = true;
+    for(int i = 0; i < MAX_ENEMIES; i++){
+        Enemy* other = &enemies[i];
+        if(other == e) continue;
+        if(other->isAggroed) continue;
+
+        float dist = V2Dist(e->pos, other->pos);
+        // the mob alerts their allies at half the dist it takes to aggro said mob
+        if(dist <= e->aggroRadius/2){
+            other->isAggroed = true;
+        }
+    }
+}
+
 void handle_player_stuff(float dt){
     // Screen shake decay
     if (screenShake > 0) screenShake -= dt * 8.0f;
@@ -508,6 +600,9 @@ void handle_player_stuff(float dt){
 
                     // Instant-hit auto attack: deal damage, then show a flash line
                     Enemy *t = &enemies[player.atkTargetIdx];
+                    on_enemy_attacked(t);
+                    t->wasJustAttacked = true;
+                    
                     t->hp -= 10;
                     t->flashTimer = 0.12f;
                     SpawnBurst(t->pos, WHITE, 6);
@@ -605,7 +700,6 @@ void handle_particles(float dt) {
     }
 }
 
-
 void handle_enemies(float dt) {
     // ── Update enemies ────────────────────────────────────────────────────────
     Vector2 mp = GetMousePosition();
@@ -614,33 +708,79 @@ void handle_enemies(float dt) {
     Vector2 point = { mp.x - fmod_x, mp.y - fmod_y};
     Rectangle r = {point.x, point.y, SQUARE_SIZE, SQUARE_SIZE};
     for (int i = 0; i < MAX_ENEMIES; i++) {
+        printf("working on enemy idx: %d\n", i);
         Enemy *e = &enemies[i];
 
-        // if(CheckCollisionRecs(r, EntityRect(e->pos, ENEMY_SIZE + 6))){
-        //     printf("COLIDING!!");
-        // }
         if (!e->active) continue;
         if(e->hp <= 0){
+            //TODO: should we continue here?
             e->active = false;
             SpawnBurst(e->pos, e->type == ENEMY_RAT ?
                        (Color){80,120,255,255} : (Color){200,200,200,255}, 20);
         } 
         if (e->flashTimer > 0) e->flashTimer -= dt;
+        
+        float distToPlayer = V2Dist(e->pos, player.pos);
+        switch(e->behaviorType){
 
-        if (e->type == ENEMY_RAT) {
-            Vector2 dir = V2Norm((Vector2){player.pos.x - e->pos.x,
-                                           player.pos.y - e->pos.y});
-            e->pos.x += dir.x * RAT_SPEED * dt;
-            e->pos.y += dir.y * RAT_SPEED * dt;
+            case ENEMY_AGRESSIVE:
+            case ENEMY_RANGED:
+                if(!e->isAggroed && distToPlayer <= e->aggroRadius){
+                    e->isAggroed = true;
+                }
+                if(e->isAggroed && distToPlayer > e->aggroRadius*1.5f){
+                    e->isAggroed = false;
+                }
+                break;
+            case ENEMY_PASSIVE:
+                if(e->isAggroed && distToPlayer > e->aggroRadius*1.5f){
+                    e->isAggroed = false;
+                }
+                e->wasJustAttacked = false;
+                break;
+            case ENEMY_IMMOBILE:
+                break;
+        }
 
-            if (player.iFrames <= 0 &&
-                CheckCollisionRecs(EntityRect(player.pos, PLAYER_SIZE),
-                                   EntityRect(e->pos, ENEMY_SIZE))) {
-                player.hp      -= 15;
-                player.iFrames  = 0.5f;
-                screenShake     = 0.5f;
-                SpawnBurst(player.pos, RED, 12);
+        if (!e->isAggroed){
+            e->vel.x = 0;
+            e->vel.y = 0;
+            continue;
+        }
+
+        Vector2 dirToPlayer = V2DirTo(e->pos, player.pos);
+
+        if(e->behaviorType == ENEMY_IMMOBILE){
+            // do nothing, stationary
+        } else if (e->behaviorType == ENEMY_RANGED){
+            float margin = 20.0f; 
+            if(distToPlayer < e->preferredDist - margin){
+                e->vel.x = -dirToPlayer.x * e->mvSpd;
+                e->vel.y = -dirToPlayer.y * e->mvSpd;
+            } else if (distToPlayer > e->preferredDist + margin) {
+                e->vel.x = dirToPlayer.x*e->mvSpd;
+                e->vel.y = dirToPlayer.y*e->mvSpd;
+            } else {
+                e->vel.x = 0;
+                e->vel.y = 0;
             }
+        } else {
+            // always move towards player (if aggroed)
+            e->vel.x = dirToPlayer.x*e->mvSpd;
+            e->vel.y = dirToPlayer.y*e->mvSpd;
+        }
+
+        e->pos.x += e->vel.x*dt;
+        e->pos.y += e->vel.y*dt;
+
+
+        if (player.iFrames <= 0 &&
+            CheckCollisionRecs(EntityRect(player.pos, PLAYER_SIZE),
+                               EntityRect(e->pos, ENEMY_SIZE))) {
+            player.hp      -= 15;
+            player.iFrames  = 0.5f;
+            screenShake     = 0.5f;
+            SpawnBurst(player.pos, RED, 12);
         }
     }
 
@@ -693,7 +833,7 @@ void handle_bullets(float dt){
                 screenShake = 0.15f;
                 if (e->hp <= 0) {
                     e->active = false;
-                    SpawnBurst(e->pos, e->type == ENEMY_RAT ?
+                    SpawnBurst(e->pos, e->type == ENEMY_RAT || e->type == ENEMY_RANGED_RAT ?
                                (Color){80,120,255,255} : (Color){200,200,200,255}, 20);
                     score += (e->type == ENEMY_RAT) ? 50 : 20;
                     screenShake = 0.4f;
@@ -851,6 +991,7 @@ void handle_draw_spell_preview(){
             DrawRectangleRounded(nr, .3f, 0, c);
         }
     }
+    break;
     }
     case SPELL_WAVY_SHOT:
     {
@@ -860,25 +1001,24 @@ void handle_draw_spell_preview(){
     Vector2 prevPoint1 = {0};
     Vector2 prevPoint2 = {0};
     float GRID_SIZE = 50.f;
-    for(int i = 0; i <= WAVE_STEPS; i++){
-        float t = (float)i / WAVE_STEPS;
+    int steps = SCREEN_W/10;
+    for(int i = 0; i <= steps; i+=100){
+        float t = (float)i / steps; // kinda like lerping
         float dist = t * WAVE_LENGTH;
-        float offset = sinf(t * WAVE_FREQUENCY * 2.0f * PI) * WAVE_AMPLITUDE;
+        float offset = sinf(t * WAVE_FREQUENCY * 2.0f * PI) * 200.f;
 
-        float x1 = player.pos.x + dir.x * dist + perpendicular1.x * offset;
-        float y1 = player.pos.y + dir.y * dist + perpendicular1.y * offset;
+        float x1 = 300 + 1*dist + perpendicular1.x * offset;
+        float y1 = 300 + 0 + perpendicular1.y * offset;
         Vector2 p1 = {x1*GRID_SIZE, y1*GRID_SIZE};
-        float x2 = player.pos.x + dir.x * dist + perpendicular2.x * offset;
-        float y2 = player.pos.y + dir.y * dist + perpendicular2.y * offset;
-        Vector2 p2 = {x2*GRID_SIZE, y2*GRID_SIZE};
         Color c = WHITE;
         if (i > 0) {
-            DrawLineEx(prevPoint1, p1, 2.f, c);
-            DrawLineEx(prevPoint2, p2, 2.f, c);
+            DrawLineEx(prevPoint1, p1, 10.f, c);
+            // DrawLineEx(prevPoint2, p2, 2.f, c);
         }
         prevPoint1 = p1;
-        prevPoint2 = p2;
+        // prevPoint2 = p2;
     }
+    break;
     }
 
     default:
@@ -920,6 +1060,37 @@ static void Draw(void) {
     for (int y = 0; y < SCREEN_H; y+= SQUARE_SIZE){
         DrawLine(0,y, SCREEN_W, y, (Color){30,30,50,255});
     }
+    // Vector2 prevPoint1 = {0};
+    // Vector2 prevPoint2 = {0};
+    // Vector2 origin = player.pos;
+    // Vector2 end = GetMousePosition();
+    // Vector2 full_dir = {end.x - origin.x, end.y - origin.y};
+    // Vector2 dir = V2Norm(full_dir);
+    // Vector2 perp = {-dir.y, dir.x};
+    // Vector2 perp2 = {dir.y, -dir.x};
+    // float amplitude = 100.f;
+    // int steps = 100;
+    // for(int i = 0; i <= steps; i+=1){
+    //
+    //     float t = (float)i / steps; // kinda like lerping
+    //     float dist = t * V2Len(full_dir);
+    //     float offset = sinf(t * 2 * 2.0f * PI) * amplitude;
+    //     float curr_x = dir.x*dist + origin.x + perp.x * offset;
+    //     float curr_y = dir.y*dist + origin.y + perp.y * offset;
+    //
+    //     float curr_x2 = dir.x*dist + origin.x + perp2.x * offset;
+    //     float curr_y2 = dir.y*dist + origin.y + perp2.y * offset;
+    //
+    //     DrawLineEx(origin, end, 10.f, GREEN);
+    //     Vector2 p1 = {curr_x, curr_y};
+    //     Vector2 p2 = {curr_x2, curr_y2};
+    //     if(i > 0){
+    //         DrawLineEx(prevPoint1, p1, 3.f, WHITE);
+    //         DrawLineEx(prevPoint2, p2, 3.f, WHITE);
+    //     }
+    //     prevPoint1 = p1;
+    //     prevPoint2 = p2;
+    // }
 
     // ── Draw line to selected target ─────────────────────────────────────────
     if (player.atkTargetIdx >= 0 && enemies[player.atkTargetIdx].active) {
@@ -991,12 +1162,16 @@ static void Draw(void) {
         DrawRectangle((int)(e->pos.x - barW/2 + shake.x),
                       (int)(e->pos.y - ENEMY_SIZE/2 - 8 + shake.y),
                       (int)(barW * hpPct), 4,
-                      e->type == ENEMY_RAT ? (Color){80,120,255,255} : (Color){200,80,80,255});
+                      e->type == ENEMY_RAT || e->type == ENEMY_RANGED_RAT ? (Color){80,120,255,255} : (Color){200,80,80,255});
 
         if (e->type == ENEMY_RAT)
             DrawText("RAT", (int)(e->pos.x - 12 + shake.x),
                      (int)(e->pos.y + ENEMY_SIZE/2 + 4 + shake.y), 10,
                      (Color){80,120,255,180});
+        if (e->type == ENEMY_RANGED_RAT)
+            DrawText("RANGED RAT", (int)(e->pos.x - 12 + shake.x),
+                     (int)(e->pos.y + ENEMY_SIZE/2 + 4 + shake.y), 10,
+                     (Color){110,190,255,180});
     }
 
     // ── Bullets ───────────────────────────────────────────────────────────────
